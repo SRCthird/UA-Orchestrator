@@ -1,0 +1,8 @@
+action,tag,value,sleep
+comment,This comment is output in the terminal,,0
+#anything,This comment is only shown in the document,,0
+read,Channel1.Device1.Tag01,,0
+user_write,Channel1.Device1.Tag02,,0
+write,Channel1.Device1.TRIGGER02,TRUE,0
+wait_until,Channel1.Device1.TRIGGER02,FALSE,0
+wait,Hit Enter to exit,,0
