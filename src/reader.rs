@@ -1,3 +1,6 @@
+// // Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
+// // All rights reserved
+
 use color_print::cformat;
 use regex::Regex;
 use rustyline::completion::FilenameCompleter;

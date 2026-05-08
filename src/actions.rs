@@ -1,3 +1,6 @@
+// // Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
+// // All rights reserved
+
 use color_print::{cprintln, cformat};
 use opcua_client::prelude::{NodeId, UAString, Variant};
 use serde::Deserialize;

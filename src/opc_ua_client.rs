@@ -1,3 +1,6 @@
+// // Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
+// // All rights reserved
+
 use opcua_client::prelude::*;
 use std::sync::{RwLock, Arc};
 use gethostname::gethostname;

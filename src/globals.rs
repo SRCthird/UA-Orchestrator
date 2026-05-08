@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+// // Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
+// // All rights reserved
+
 
 use opcua_client::prelude::{StatusCode,Variant};
 
