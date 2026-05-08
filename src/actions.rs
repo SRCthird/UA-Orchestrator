@@ -141,3 +141,17 @@ pub fn process_row(
         thread::sleep(Duration::from_millis(row.sleep));
     }
 }
+
+pub fn run_csv(client: &mut impl OpcUaClient, reader: &mut impl InputReader, csv_path: &str) {
+    let mut rdr = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All)
+        .from_path(csv_path)
+        .unwrap_or_else(|e| panic!("{}", Globals::csv_open_failed(csv_path, e)));
+
+    for (line, result) in rdr.deserialize::<CsvRow>().enumerate() {
+        match result {
+            Ok(row) => process_row(&row, line + 2, client, reader),
+            Err(e) => eprintln!("{}", Globals::csv_invalid_row(line + 2, e)),
+        }
+    }
+}
