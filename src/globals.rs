@@ -106,5 +106,11 @@ impl Globals {
     pub fn csv_wait_until_completed(tag: &str, current: &Variant) -> String {
         format!("[WAITFOR] Satisfied: {} == {:?}", tag, current)
     }
+    pub fn csv_open_failed(path: &str, e: csv::Error) -> String {
+        format!("[ERR]     Failed to open CSV '{}': {}", path, e)
+    }
+    pub fn csv_invalid_row(line: usize, e: csv::Error) -> String {
+        format!("[WARN]    Line {}: skipping invalid row: {}", line, e)
+    }
 
 }
