@@ -1,6 +1,7 @@
 use opcua_client::prelude::*;
 use std::fs;
 use serde::Deserialize;
+use crate::globals::Globals;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -14,10 +15,10 @@ pub struct Config {
 impl Config {
     pub fn load(path: &str) -> Self {
         let content = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("Failed to read {}: {}", path, e));
+            .unwrap_or_else(|e| panic!("{}", Globals::config_failed_read(path, e)));
 
         toml::from_str(&content)
-            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path, e))
+            .unwrap_or_else(|e| panic!("{}", Globals::config_failed_parse(path, e)))
     }
 
     pub fn security_policy(&self) -> SecurityPolicy {
@@ -26,7 +27,7 @@ impl Config {
             "Basic128Rsa15" => SecurityPolicy::Basic128Rsa15,
             "Basic256" => SecurityPolicy::Basic256,
             "Basic256Sha256" => SecurityPolicy::Basic256Sha256,
-            other => panic!("Unsupported security policy: {}", other),
+            other => panic!("{}", Globals::unsupported_security_policy(other)),
         }
     }
 
@@ -35,7 +36,7 @@ impl Config {
             "None" => MessageSecurityMode::None,
             "Sign" => MessageSecurityMode::Sign,
             "SignAndEncrypt" => MessageSecurityMode::SignAndEncrypt,
-            other => panic!("Unsupported security mode: {}", other),
+            other => panic!("{}", Globals::unsupported_security_mode(other)),
         }
     }
 }
