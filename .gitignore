@@ -26,3 +26,4 @@ target
 /target
 Config.toml
 pki
+actions.csv
