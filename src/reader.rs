@@ -78,3 +78,13 @@ impl StdinReader {
         }
     }
 }
+
+pub trait InputReader {
+    fn read_line(&mut self, prompt: String) -> String;
+}
+
+impl InputReader for StdinReader {
+    fn read_line(&mut self, prompt: String) -> String {
+        self.read_line(prompt)
+    }
+}
