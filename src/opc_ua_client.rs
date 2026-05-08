@@ -199,3 +199,101 @@ impl<B: SessionBackend> OpcUaSession<B> {
         }
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    pub struct FakeSessionBackend {
+        pub store: Mutex<HashMap<NodeId, Variant>>,
+    }
+
+    impl FakeSessionBackend {
+        pub fn new() -> Self {
+            Self { store: Mutex::new(HashMap::new()) }
+        }
+
+        pub fn seed(self, node_id: NodeId, value: Variant) -> Self {
+            self.store.lock().unwrap().insert(node_id, value);
+            self
+        }
+    }
+
+    impl SessionBackend for FakeSessionBackend {
+        fn read_nodes(&self, nodes: &[ReadValueId]) -> Result<Vec<DataValue>, StatusCode> {
+            let store = self.store.lock().unwrap();
+            let results = nodes
+                .iter()
+                .map(|rvid| DataValue {
+                    value: store.get(&rvid.node_id).cloned(),
+                    status:             None,
+                    source_timestamp:   None,
+                    source_picoseconds: None,
+                    server_timestamp:   None,
+                    server_picoseconds: None,
+                })
+                .collect();
+            Ok(results)
+        }
+
+        fn write_nodes(&self, nodes: &[WriteValue]) -> Result<Vec<StatusCode>, StatusCode> {
+            let mut store = self.store.lock().unwrap();
+            let statuses = nodes
+                .iter()
+                .map(|wv| {
+                    if let Some(v) = wv.value.value.clone() {
+                        store.insert(wv.node_id.clone(), v);
+                        StatusCode::Good
+                    } else {
+                        StatusCode::BadNoData
+                    }
+                })
+                .collect();
+            Ok(statuses)
+        }
+    }
+
+    fn fake_session(node_id: &NodeId, value: Variant) -> OpcUaSession<FakeSessionBackend> {
+        OpcUaSession::with_backend(
+            FakeSessionBackend::new().seed(node_id.clone(), value)
+        )
+    }
+
+    #[test]
+    fn read_returns_seeded_value() {
+        let node_id = NodeId::new(2, "TestNode");
+        let session = fake_session(&node_id, Variant::Boolean(true));
+        assert_eq!(session.read(&node_id), Some(Variant::Boolean(true)));
+    }
+
+    #[test]
+    fn read_returns_none_for_missing_node() {
+        let session = OpcUaSession::with_backend(FakeSessionBackend::new());
+        let node_id = NodeId::new(2, "Missing");
+        assert_eq!(session.read(&node_id), None);
+    }
+
+    #[test]
+    fn write_then_read_roundtrip() {
+        let node_id = NodeId::new(2, "RoundTrip");
+        let session = OpcUaSession::with_backend(FakeSessionBackend::new());
+        session.write(&node_id, Variant::Int32(42));
+        assert_eq!(session.read(&node_id), Some(Variant::Int32(42)));
+    }
+
+    #[test]
+    fn read_many_returns_correct_order() {
+        let ids: Vec<NodeId> = (0..3).map(|i| NodeId::new(2, format!("N{i}"))).collect();
+        let backend = FakeSessionBackend::new()
+            .seed(ids[0].clone(), Variant::Int32(10))
+            .seed(ids[2].clone(), Variant::Int32(30));
+        let session = OpcUaSession::with_backend(backend);
+        let results = session.read_many(&ids);
+        assert_eq!(results[0], Some(Variant::Int32(10)));
+        assert_eq!(results[1], None);
+        assert_eq!(results[2], Some(Variant::Int32(30)));
+    }
+}
+
