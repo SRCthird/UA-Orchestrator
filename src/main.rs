@@ -12,7 +12,6 @@ use crate::opc_ua_client::{OpcUaSession,LiveOpcUaClient};
 
 fn main() {
     let config  = config::Config::load(Globals::config_file());
-    println!("{:#?}", config);
 
     let mut stdreader = StdinReader;
     let args: Vec<String> = std::env::args().collect();
@@ -23,16 +22,10 @@ fn main() {
         let prompt = cformat!("<white>{}</>", Globals::csv_request_path());
         stdreader.read_line(prompt)
     };
-    println!("{}", csv_path);
 
     let session = OpcUaSession::new(&config);
     let mut client = LiveOpcUaClient { session: &session };
 
-    actions::process_row(&actions::CsvRow {
-        action: String::from("read"),
-        tag: String::from("Channel1.Device1.CycleStart"),
-        value: Some(String::from("true")),
-        sleep: 0,
-    }, 0, &mut client, &mut stdreader);
+    actions::run_csv(&mut client, &mut stdreader, &csv_path);
 
 }
