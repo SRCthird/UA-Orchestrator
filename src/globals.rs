@@ -24,5 +24,8 @@ impl Globals {
         format!("Unsupported security policy: {}", other)
     }
 
+    pub fn csv_request_path() -> &'static str {
+        "[PATH]    Please provide path to csv <= "
+    }
 
 }
