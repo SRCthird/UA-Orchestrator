@@ -1,3 +1,5 @@
+![repo-card](/resources/repo_card.png)
+
 # UA-Orchestrator
 A command-line tool for automating OPC UA node interactions using a CSV action script. Built with Rust, it connects to an OPC UA server and executes a sequence of read, write, and wait operations defined by the selected CSV file.
 
@@ -57,6 +59,8 @@ Run the binary and optionally pass the path to your CSV file as an argument:
 ```
 
 If no path is provided, the tool will prompt you to enter one interactively.
+
+![usage-1](/resources/Screenshot-01.png)
 
 ## CSV Action Format
 
@@ -140,9 +144,12 @@ cargo test
 ```
 
 ## Deployment Note
-If the compiled binary is moved to a system without Rust installed, the following OpenSSL DLLs must be present either in the same directory as the executable or somewhere on the system PATH:
-- libcrypto-3-x64.dll
-- libssl-3-x64.dll
+If the compiled binary is moved to a system or environment without [OpenSSL 4](https://github.com/openssl/openssl/releases/tag/openssl-4.0.0) installed, the following OpenSSL DLLs must be present either in the same directory as the executable or somewhere on the system PATH:
+
+- libcrypto-4-x64.dll
+- libssl-4-x64.dll
+
+![Deployment-Note](/resources/Screenshot-02.png)
 
 ## Copyright
 
