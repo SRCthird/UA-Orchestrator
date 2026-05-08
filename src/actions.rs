@@ -155,3 +155,115 @@ pub fn run_csv(client: &mut impl OpcUaClient, reader: &mut impl InputReader, csv
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opcua_client::prelude::{NodeId, Variant, UAString};
+    use std::collections::HashMap;
+    use crate::opc_ua_client::OpcUaClient;
+    use crate::reader::InputReader;
+
+    // ── Fakes ────────────────────────────────────────────────────────────────
+
+    #[derive(Default)]
+    struct FakeClient {
+        pub store: HashMap<String, Variant>,
+        pub writes: Vec<(NodeId, Variant)>,
+    }
+
+    impl OpcUaClient for FakeClient {
+        fn read(&self, node_id: &NodeId) -> Option<Variant> {
+            self.store.get(&node_id.to_string()).cloned()
+        }
+        fn write(&mut self, node_id: &NodeId, value: Variant) {
+            self.writes.push((node_id.clone(), value));
+        }
+    }
+
+    struct ScriptedReader {
+        lines: Vec<String>,
+    }
+
+    impl ScriptedReader {
+        fn new(lines: &[&str]) -> Self {
+            Self { lines: lines.iter().rev().map(|s| s.to_string()).collect() }
+        }
+    }
+
+    impl InputReader for ScriptedReader {
+        fn read_line(&mut self, _prompt: String) -> String {
+            self.lines.pop().unwrap_or_default()
+        }
+    }
+
+    // ── parse_variant tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_bool_true()  { assert_eq!(parse_variant("true"),  Variant::Boolean(true));  }
+    #[test]
+    fn parse_bool_false() { assert_eq!(parse_variant("False"), Variant::Boolean(false)); }
+    #[test]
+    fn parse_int()        { assert_eq!(parse_variant("42"),    Variant::Int64(42));       }
+    #[test]
+    fn parse_float()      { assert_eq!(parse_variant("3.14"),  Variant::Double(3.14));    }
+    #[test]
+    fn parse_string()     {
+        assert_eq!(parse_variant("hello"),
+            Variant::String(UAString::from("hello")));
+    }
+
+    // ── process_row tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn write_row_calls_client() {
+        let mut client = FakeClient::default();
+        let mut reader = ScriptedReader::new(&[]);
+
+        let row = CsvRow {
+            action: "write".into(),
+            tag: "MyTag".into(),
+            value: Some("99".into()),
+            sleep: 0,
+        };
+
+        process_row(&row, 2, &mut client, &mut reader);
+
+        assert_eq!(client.writes.len(), 1);
+        assert_eq!(client.writes[0].1, Variant::Int64(99));
+    }
+
+    #[test]
+    fn user_write_reads_from_reader() {
+        let mut client = FakeClient::default();
+        let mut reader = ScriptedReader::new(&["123"]);
+
+        let row = CsvRow {
+            action: "user_write".into(),
+            tag: "MyTag".into(),
+            value: None,
+            sleep: 0,
+        };
+
+        process_row(&row, 2, &mut client, &mut reader);
+
+        assert_eq!(client.writes[0].1, Variant::Int64(123));
+    }
+
+    #[test]
+    fn read_row_with_no_value_does_not_write() {
+        let mut client = FakeClient::default();
+        let mut reader = ScriptedReader::new(&[]);
+
+        let row = CsvRow {
+            action: "read".into(),
+            tag: "Missing".into(),
+            value: None,
+            sleep: 0,
+        };
+
+        process_row(&row, 2, &mut client, &mut reader);
+        assert!(client.writes.is_empty());
+    }
+}
+
