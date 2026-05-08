@@ -1,0 +1,5 @@
+server_url = "opc.tcp://<host>:49320"
+server_security_policy = "Basic256Sha256"
+server_security_mode = "SignAndEncrypt"
+username = ""
+password = ""

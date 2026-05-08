@@ -1,3 +1,6 @@
+mod config;
+
 fn main() {
-    println!("Hello, world!");
+    let config  = config::Config::load("Config.toml");
+    println!("{:#?}", config);
 }
