@@ -1,6 +1,66 @@
 // // Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
 // // All rights reserved
 
+//! # Actions
+//!
+//! This module provides functionality for executing OPC UA operations defined
+//! in a CSV script file. Each row in the CSV describes a single action to
+//! perform against an OPC UA server — such as reading a node value, writing a
+//! value, waiting for user input, or polling until a node reaches a target
+//! state.
+//!
+//! ## CSV Format
+//!
+//! The CSV file must contain the following columns (order matters, headers required):
+//!
+//! | Column  | Type             | Description                                                            |
+//! |---------|------------------|------------------------------------------------------------------------|
+//! | action  | `String`         | The operation to perform (see supported actions below)                 |
+//! | tag     | `String`         | The OPC UA node identifier string (namespace index 2)                  |
+//! | value   | `Option<String>` | Optional value used by `write`, `user_write`, and `wait_until`         |
+//! | sleep   | `u64`            | Milliseconds to sleep after the row is processed                       |
+//!
+//! ## Supported Actions
+//!
+//! | Action        | Description                                                                                 |
+//! |---------------|---------------------------------------------------------------------------------------------|
+//! | `read`        | Reads the current value of the OPC UA node and prints it to stdout.                         |
+//! | `write`       | Writes the value in the `value` column to the OPC UA node.                                  |
+//! | `user_write`  | Prompts the user for input (or uses `value` if provided) and writes it to the node.         |
+//! | `comment`     | Prints the `tag` column as a human-readable comment — no OPC UA interaction.                |
+//! | `wait`        | Pauses execution and waits for the user to press Enter before continuing.                   |
+//! | `wait_until`  | Polls the OPC UA node every `sleep` ms until its value equals `value`.                      |
+//! | `#...`        | Any action starting with `#` is a silent inline script comment and is skipped.              |
+//!
+//! ## Value Parsing
+//!
+//! Values in the `value` column are automatically parsed into OPC UA `Variant`
+//! types by [`parse_variant`]:
+//!
+//! - `"true"` / `"false"` (case-insensitive) → `Variant::Boolean`
+//! - Integer strings (e.g. `"42"`) → `Variant::Int64`
+//! - Floating-point strings (e.g. `"3.14"`) → `Variant::Double`
+//! - Anything else → `Variant::String`
+//!
+//! ## Example CSV
+//!
+//! ```text
+//! action,tag,value,sleep
+//! comment,Starting test sequence,,0
+//! write,Reactor/SetPoint,75.0,500
+//! wait_until,Reactor/Status,Running,1000
+//! read,Reactor/Temperature,,0
+//! wait,Press Enter to continue,,0
+//! ```
+//!
+//! ## Usage
+//!
+//! ```rust,ignore
+//! use my_crate::csv_runner::run_csv;
+//!
+//! run_csv(&mut opc_client, &mut stdin_reader, "./script.csv");
+//! ```
+
 use color_print::{cprintln, cformat};
 use opcua_client::prelude::{NodeId, UAString, Variant};
 use serde::Deserialize;
@@ -11,14 +71,51 @@ use crate::globals::Globals;
 use crate::opc_ua_client::OpcUaClient;
 use crate::reader::InputReader;
 
+/// Represents a single row in the CSV script file.
+///
+/// Each field maps directly to a CSV column. The struct is deserialized
+/// automatically by [`run_csv`] using the `csv` + `serde` crates.
+///
+/// # Fields
+///
+/// - `action` — The operation to execute (e.g. `"read"`, `"write"`).
+/// - `tag`    — The OPC UA node identifier string. A [`NodeId`] is constructed
+///              from this using namespace index `2`.
+/// - `value`  — An optional string value. Required by `write`, `user_write`,
+///              and `wait_until`; ignored by others.
+/// - `sleep`  — Milliseconds to sleep **after** the row has been processed.
+///              Also used as the polling interval in `wait_until`.
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct CsvRow {
+    /// The action keyword that determines which OPC UA operation is performed.
     pub action: String,
+    /// The OPC UA node tag / identifier string (namespace index 2).
     pub tag: String,
+    /// An optional value string, interpreted by [`parse_variant`].
     pub value: Option<String>,
+    /// Milliseconds to sleep after processing this row (and polling interval
+    /// for `wait_until`).
     pub sleep: u64,
 }
 
+/// Parses a string slice into an OPC UA [`Variant`].
+///
+/// The conversion follows this priority order:
+///
+/// 1. `"true"` or `"false"` (case-insensitive, whitespace trimmed)
+///    → [`Variant::Boolean`]
+/// 2. A valid `i64` integer literal → [`Variant::Int64`]
+/// 3. A valid `f64` floating-point literal → [`Variant::Double`]
+/// 4. Anything else → [`Variant::String`] (whitespace trimmed)
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert_eq!(parse_variant("true"),  Variant::Boolean(true));
+/// assert_eq!(parse_variant("42"),    Variant::Int64(42));
+/// assert_eq!(parse_variant("3.14"),  Variant::Double(3.14));
+/// assert_eq!(parse_variant("hello"), Variant::String(UAString::from("hello")));
+/// ```
 pub fn parse_variant(s: &str) -> Variant {
     let lower = s.trim().to_lowercase();
 
@@ -37,6 +134,26 @@ pub fn parse_variant(s: &str) -> Variant {
     Variant::String(UAString::from(s.trim()))
 }
 
+/// Executes a single [`CsvRow`] against the provided OPC UA client.
+///
+/// This is the core dispatch function of the module. It inspects
+/// `row.action` and routes to the appropriate OPC UA operation.
+///
+/// # Arguments
+///
+/// * `row`    — The parsed CSV row describing the action to perform.
+/// * `line`   — The 1-based CSV line number (used in error messages).
+/// * `client` — A mutable reference to any type implementing [`OpcUaClient`].
+/// * `reader` — A mutable reference to any type implementing [`InputReader`],
+///              used for `wait` and `user_write` prompts.
+///
+/// # Behaviour
+///
+/// After the action is executed, the function sleeps for `row.sleep`
+/// milliseconds (if > 0).
+///
+/// Unknown action strings are logged as warnings and skipped rather than
+/// panicking.
 pub fn process_row(
     row: &CsvRow,
     line: usize,
@@ -145,6 +262,28 @@ pub fn process_row(
     }
 }
 
+/// Reads and executes a CSV script file against the provided OPC UA client.
+///
+/// Opens the file at `csv_path`, deserializes each row into a [`CsvRow`],
+/// and dispatches it to [`process_row`]. Rows that fail to deserialize are
+/// printed as errors to `stderr` and skipped — they do **not** abort the run.
+///
+/// # Arguments
+///
+/// * `client`   — A mutable reference to any type implementing [`OpcUaClient`].
+/// * `reader`   — A mutable reference to any type implementing [`InputReader`].
+/// * `csv_path` — Path to the CSV script file on the filesystem.
+///
+/// # Panics
+///
+/// Panics if the CSV file cannot be opened (e.g. file not found, permission
+/// denied). The panic message includes the path and the underlying I/O error.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// run_csv(&mut opc_client, &mut stdin_reader, "./automation_script.csv");
+/// ```
 pub fn run_csv(client: &mut impl OpcUaClient, reader: &mut impl InputReader, csv_path: &str) {
     let mut rdr = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
@@ -269,4 +408,3 @@ mod tests {
         assert!(client.writes.is_empty());
     }
 }
-
