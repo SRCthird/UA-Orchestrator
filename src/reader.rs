@@ -22,7 +22,7 @@
 //! - **History hinting** — previous entries are shown as dim ghost text.
 //! - **Bracket validation** — mismatched brackets are flagged before the line
 //!   is submitted.
-//! - **Graceful Ctrl-C / Ctrl-D** — both signals call [`std::process::exit(0)`]
+//! - **Graceful Ctrl-C / Ctrl-D** — both signals call [`std::process::exit`]
 //!   for a clean shutdown from any call site.
 //!
 //! ## Usage
@@ -176,7 +176,7 @@ impl StdinReader {
     /// trimmed. Returns an empty [`String`] on unexpected I/O errors.
     ///
     /// # Process exit
-    /// Calls [`std::process::exit(0)`] on `Ctrl-C` (`Interrupted`) or
+    /// Calls [`std::process::exit`] on `Ctrl-C` (`Interrupted`) or
     /// `Ctrl-D` (`Eof`) so the application shuts down cleanly regardless of
     /// the call-stack depth.
     pub fn read_line(&mut self, colored_prompt: String) -> String {

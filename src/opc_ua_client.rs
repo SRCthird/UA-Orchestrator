@@ -40,7 +40,7 @@
 //! The interface consumed by [`OpcUaSession`]. Wraps the raw OPC UA service
 //! calls ([`read_nodes`](SessionBackend::read_nodes) /
 //! [`write_nodes`](SessionBackend::write_nodes)) so that
-//! [`FakeSessionBackend`](tests::FakeSessionBackend) can replace them in tests
+//! [`FakeSessionBackend`](crate::opc_ua_client::tests::FakeSessionBackend) can replace them in tests
 //! without any network interaction.
 //!
 //! ## Typical Production Call Chain
@@ -142,7 +142,7 @@ impl<'a> OpcUaClient for LiveOpcUaClient<'a> {
 /// Low-level OPC UA service interface used internally by [`OpcUaSession`].
 ///
 /// This trait isolates the raw OPC UA service calls behind a seam, enabling
-/// [`FakeSessionBackend`](tests::FakeSessionBackend) to replace the real
+/// [`FakeSessionBackend`](crate::opc_ua_client::tests::FakeSessionBackend) to replace the real
 /// network stack in unit tests.
 ///
 /// # Implementors
@@ -150,7 +150,7 @@ impl<'a> OpcUaClient for LiveOpcUaClient<'a> {
 /// | Type | Purpose |
 /// |---|---|
 /// | [`LiveSessionBackend`] | Production — wraps `Arc<RwLock<Session>>` |
-/// | [`tests::FakeSessionBackend`] | Test double — `Mutex<HashMap>` store |
+/// | [`FakeSessionBackend`](crate::opc_ua_client::tests::FakeSessionBackend) | Test double — `Mutex<HashMap>` store |
 pub trait SessionBackend {
     /// Sends a batch read request to the OPC UA server.
     ///
@@ -218,7 +218,7 @@ impl SessionBackend for LiveSessionBackend {
 /// operations on top of a [`SessionBackend`].
 ///
 /// The type parameter `B` defaults to [`LiveSessionBackend`] in production.
-/// Tests substitute [`FakeSessionBackend`](tests::FakeSessionBackend) via
+/// Tests substitute [`FakeSessionBackend`](crate::opc_ua_client::tests::FakeSessionBackend) via
 /// [`OpcUaSession::with_backend`].
 ///
 /// # Type Parameters
@@ -315,7 +315,7 @@ impl<B: SessionBackend> OpcUaSession<B> {
     /// Creates an [`OpcUaSession`] backed by a custom [`SessionBackend`].
     ///
     /// Intended for unit testing. Pass a
-    /// [`FakeSessionBackend`](tests::FakeSessionBackend) to exercise session
+    /// [`FakeSessionBackend`](crate::opc_ua_client::tests::FakeSessionBackend) to exercise session
     /// logic without a real server.
     ///
     /// # Arguments

@@ -404,7 +404,7 @@ impl Globals {
         format!("[ERR]     Failed to open CSV '{}': {}", path, e)
     }
 
-    /// Formats a warning when a CSV row fails to deserialise into a [`CsvRow`].
+    /// Formats a warning when a CSV row fails to deserialise into a [`CsvRow`](crate::actions::CsvRow).
     ///
     /// The row is skipped and processing continues with the next line.
     ///
