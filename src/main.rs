@@ -1,5 +1,5 @@
-// // Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
-// // All rights reserved
+// Copyright 2026 Merck KGaA, Darmstadt, Germany and/or its affiliates.
+// All rights reserved
 
 //! # UAOrchestrator — Application Entry Point
 //!
