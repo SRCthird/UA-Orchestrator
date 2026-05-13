@@ -2,6 +2,14 @@
 name = "ua-orchestrator"
 version = "1.0.0"
 edition = "2024"
+authors = ["Stevie Chryn srcthird@gmail.com"]
+description = "A command-line tool for automating OPC UA node interactions using a CSV action script"
+license = "Apache 2.0"
+repository = "https://github.com/SRCthird/UA-Orchestrator"
+homepage = ""
+readme = "README.md"
+keywords = [""]
+categories = [""]
 
 [dependencies]
 opcua-client = "0.9.1"
