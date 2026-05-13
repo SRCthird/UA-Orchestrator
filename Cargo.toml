@@ -8,8 +8,8 @@ license = "Apache-2.0"
 repository = "https://github.com/SRCthird/UA-Orchestrator"
 homepage = "https://github.com/SRCthird/UA-Orchestrator"
 readme = "README.md"
-keywords = [""]
-categories = [""]
+keywords = ["automation"]
+categories = ["network-programming"]
 
 [dependencies]
 opcua-client = "0.9.1"
