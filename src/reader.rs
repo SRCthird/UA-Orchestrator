@@ -24,18 +24,38 @@
 //!   is submitted.
 //! - **Graceful Ctrl-C / Ctrl-D** — both signals call [`std::process::exit`]
 //!   for a clean shutdown from any call site.
+//! - **Optional log file** — when `log_file` is set in `Config.toml`, every
+//!   line of user input is appended to that file with an ISO-8601 timestamp.
 //!
 //! ## Usage
 //!
 //! ```rust,ignore
 //! use crate::reader::{StdinReader, InputReader};
 //!
-//! let mut reader = StdinReader;
+//! // Without logging
+//! let mut reader = StdinReader::new(None);
+//!
+//! // With logging (path comes from Config)
+//! let mut reader = StdinReader::new(Some("/var/log/ua_orchestrator/input.log".into()));
+//!
 //! let path = reader.read_line(
 //!     color_print::cformat!("<white>Enter CSV path: </>")
 //! );
 //! println!("You entered: {path}");
 //! ```
+//!
+//! ## Log file format
+//!
+//! Each entry is a single UTF-8 line:
+//!
+//! ```text
+//! 2026-06-04T14:32:01Z | Enter CSV path:  | /data/run42.csv
+//! ```
+//!
+//! Fields are separated by ` | `:
+//! 1. UTC timestamp (RFC 3339 / ISO 8601)
+//! 2. Plain-text prompt (ANSI codes stripped)
+//! 3. The trimmed line entered by the user
 //!
 //! ## Testing
 //!
@@ -61,6 +81,9 @@ use rustyline::validate::MatchingBracketValidator;
 use rustyline::{CompletionType, Config, Editor};
 use rustyline_derive::{Completer, Helper, Hinter, Validator};
 use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
+
+use crate::logger::Logger;
 
 /// Strips ANSI SGR escape sequences (e.g. `\x1b[32m`) from a string.
 ///
@@ -145,18 +168,40 @@ impl Highlighter for ReadHelper {
 /// Production [`InputReader`] that reads a line from stdin using a
 /// `rustyline` [`Editor`].
 ///
-/// Features tab-completion, history hinting, bracket validation, and coloured
-/// prompts. See the [module-level documentation](self) for a full feature list.
+/// Features tab-completion, history hinting, bracket validation, coloured
+/// prompts, and optional input logging. See the [module-level
+/// documentation](self) for a full feature list.
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// let mut reader = StdinReader;
-/// let input = reader.read_line(color_print::cformat!("<white>Path: </>" ));
+/// // No logging
+/// let mut reader = StdinReader::new(None);
+///
+/// // Log every input line to a file
+/// let mut reader = StdinReader::new(Some("/var/log/ua_orchestrator/input.log".into()));
+///
+/// let input = reader.read_line(color_print::cformat!("<white>Path: </>"));
 /// ```
-pub struct StdinReader;
+pub struct StdinReader {
+    /// When `Some`, every successfully read line is appended here together
+    /// with a UTC timestamp and the plain-text prompt.
+    logger: Arc<Mutex<Logger>>,
+}
 
 impl StdinReader {
+    /// Creates a new [`StdinReader`].
+    ///
+    /// # Arguments
+    /// * `log_path` — Optional filesystem path. When `Some`, each line read
+    ///   from the terminal is appended to that file in the format:
+    ///   `<timestamp> | <prompt> | <input>\n`.
+    ///   The file is created if it does not exist; parent directories must
+    ///   already exist.  When `None`, no logging is performed.
+    pub fn new(logger: Arc<Mutex<Logger>>) -> Self {
+        Self { logger }
+    }
+
     /// Displays `colored_prompt` and reads a single trimmed line from stdin.
     ///
     /// Internally creates a short-lived `rustyline` [`Editor`] configured with
@@ -166,6 +211,9 @@ impl StdinReader {
     /// The coloured prompt is stripped of ANSI codes via [`strip_ansi`] before
     /// being passed to `rustyline` to keep cursor positioning correct; the
     /// original string is handed to [`ReadHelper`] for display.
+    ///
+    /// If a log path was provided at construction time, the plain prompt and
+    /// the returned line are appended to that file via [`Self::log`].
     ///
     /// # Arguments
     /// * `colored_prompt` — An ANSI-formatted prompt string. May be produced
@@ -190,19 +238,20 @@ impl StdinReader {
             .expect("Failed to create line editor");
         rl.set_helper(Some(ReadHelper::new(colored_prompt)));
 
-        match rl.readline(&plain_prompt) {
+        let result = match rl.readline(&plain_prompt) {
             Ok(line) => line.trim().to_string(),
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                std::process::exit(0);
-            }
-            Err(rustyline::error::ReadlineError::Eof) => {
-                std::process::exit(0);
-            }
+            Err(rustyline::error::ReadlineError::Interrupted) => std::process::exit(0),
+            Err(rustyline::error::ReadlineError::Eof)         => std::process::exit(0),
             Err(e) => {
                 eprintln!("Input error: {e}");
                 String::new()
             }
+        };
+
+        if let Ok(log) = self.logger.lock() {
+            log.log_input(&plain_prompt, &result);
         }
+        result
     }
 }
 

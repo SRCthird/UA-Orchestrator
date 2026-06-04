@@ -64,10 +64,12 @@
 use color_print::{cprintln, cformat};
 use opcua_client::prelude::{NodeId, UAString, Variant};
 use serde::Deserialize;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use crate::globals::Globals;
+use crate::logger::Logger;
 use crate::opc_ua_client::OpcUaClient;
 use crate::reader::InputReader;
 
@@ -167,66 +169,78 @@ pub fn parse_variant(s: &str) -> Variant {
 /// Unknown action strings are logged as warnings and skipped rather than
 /// panicking.
 pub fn process_row(
-    row: &CsvRow,
-    line: usize,
+    row:    &CsvRow,
+    line:   usize,
     client: &mut impl OpcUaClient,
     reader: &mut impl InputReader,
+    logger: &Arc<Mutex<Logger>>,
 ) {
+    let _out = |msg: &str| {
+        println!("{}", msg);
+        if let Ok(log) = logger.lock() {
+            log.log_output(msg);
+        }
+    };
+
     let node_id = NodeId::new(2, row.tag.clone());
 
     match row.action.trim().to_lowercase().as_str() {
-        s if s.starts_with("#") => { /* Document side Comment */ }
+        s if s.starts_with('#') => { /* inline script comment — silent */ }
+
         "read" => match client.read(&node_id) {
-            Some(v) => cprintln!(
-                "<green>{}</>",
-                Globals::csv_read_ok(&row.tag, &format!("{:?}", v))
-            ),
-            None => cprintln!("<yellow>{}</>", Globals::csv_read_no_value(&row.tag)),
+            Some(v) => {
+                let msg = Globals::csv_read_ok(&row.tag, &format!("{:?}", v));
+                cprintln!("<green>{}</>", msg);
+                if let Ok(log) = logger.lock() { log.log_output(&msg); }
+            }
+            None => {
+                let msg = Globals::csv_read_no_value(&row.tag);
+                cprintln!("<yellow>{}</>", msg);
+                if let Ok(log) = logger.lock() { log.log_output(&msg); }
+            }
         },
+
         "write" => match &row.value {
             Some(v_str) => {
                 let variant = parse_variant(v_str);
-                cprintln!(
-                    "<bright-green>{}</>",
-                    Globals::csv_write(&row.tag, &format!("{:?}", variant))
-                );
+                let msg = Globals::csv_write(&row.tag, &format!("{:?}", variant));
+                cprintln!("<bright-green>{}</>", msg);
+                if let Ok(log) = logger.lock() { log.log_output(&msg); }
                 client.write(&node_id, variant);
             }
             None => {
-                cprintln!(
-                    "<bright-yellow>{}</>",
-                    Globals::csv_write_missing_value(line, &row.tag)
-                );
+                let msg = Globals::csv_write_missing_value(line, &row.tag);
+                cprintln!("<bright-yellow>{}</>", msg);
+                if let Ok(log) = logger.lock() { log.log_output(&msg); }
             }
         },
+
         "user_write" => {
             let raw = match &row.value {
                 Some(v_str) => {
-                    cprintln!(
-                        "<bright-green>{}</>",
-                        Globals::csv_user_write(&row.tag, v_str)
-                    );
+                    let msg = Globals::csv_user_write(&row.tag, v_str);
+                    cprintln!("<bright-green>{}</>", msg);
+                    if let Ok(log) = logger.lock() { log.log_output(&msg); }
                     v_str.clone()
                 }
-                None => {
-                    reader.read_line(
-                        cformat!(
-                            "<bright-green>{}</>",
-                            Globals::csv_user_write_prompt(&row.tag)
-                        )
-                    )
-                }
+                None => reader.read_line(
+                    cformat!("<bright-green>{}</>", Globals::csv_user_write_prompt(&row.tag))
+                ),
             };
             client.write(&node_id, parse_variant(&raw));
         }
+
         "comment" => {
-            cprintln!("<white>{}</>", Globals::csv_comment(&row.tag));
+            let msg = Globals::csv_comment(&row.tag);
+            cprintln!("<white>{}</>", msg);
+            if let Ok(log) = logger.lock() { log.log_output(&msg); }
         }
+
         "wait" => {
-            reader.read_line(
-                cformat!("<white>{}</>", Globals::csv_wait(&row.tag))
-            );
+            // The prompt itself is logged as INPUT by StdinReader.
+            reader.read_line(cformat!("<white>{}</>", Globals::csv_wait(&row.tag)));
         }
+
         "wait_until" => {
             if let Some(v_str) = &row.value {
                 let target = parse_variant(v_str);
@@ -236,36 +250,39 @@ pub fn process_row(
                     match client.read(&node_id) {
                         Some(current) => {
                             if current == target {
-                                cprintln!(
-                                    "<green>{}</>", Globals::csv_wait_until_completed(&row.tag, &current)
-                                );
+                                let msg = Globals::csv_wait_until_completed(&row.tag, &current);
+                                cprintln!("<green>{}</>", msg);
+                                if let Ok(log) = logger.lock() { log.log_output(&msg); }
                                 break;
                             } else if !waiting_message_shown {
-                                cprintln!(
-                                    "<white>{}</>", Globals::csv_wait_until(&row.tag, &current, &target)
-                                );
+                                let msg = Globals::csv_wait_until(&row.tag, &current, &target);
+                                cprintln!("<white>{}</>", msg);
+                                if let Ok(log) = logger.lock() { log.log_output(&msg); }
                                 waiting_message_shown = true;
                             }
                         }
                         None => {
                             if !waiting_message_shown {
-                                cprintln!("<bright-yellow>{}</>",
-                                    Globals::csv_write_missing_value(line, &row.tag));
+                                let msg = Globals::csv_write_missing_value(line, &row.tag);
+                                cprintln!("<bright-yellow>{}</>", msg);
+                                if let Ok(log) = logger.lock() { log.log_output(&msg); }
                                 waiting_message_shown = true;
                             }
                         }
                     }
-
-                    std::thread::sleep(std::time::Duration::from_millis(row.sleep.max(1)));
+                    std::thread::sleep(Duration::from_millis(row.sleep.max(1)));
                 }
             } else {
-                cprintln!("<bright-yellow>{}</>",
-                    Globals::csv_write_missing_value(line, &row.tag));
+                let msg = Globals::csv_write_missing_value(line, &row.tag);
+                cprintln!("<bright-yellow>{}</>", msg);
+                if let Ok(log) = logger.lock() { log.log_output(&msg); }
             }
         }
 
         other => {
-            cprintln!("<yellow>{}</>", Globals::csv_unknown_action(line, other));
+            let msg = Globals::csv_unknown_action(line, other);
+            cprintln!("<yellow>{}</>", msg);
+            if let Ok(log) = logger.lock() { log.log_output(&msg); }
         }
     }
 
@@ -296,7 +313,12 @@ pub fn process_row(
 /// ```rust,ignore
 /// run_csv(&mut opc_client, &mut stdin_reader, "./automation_script.csv");
 /// ```
-pub fn run_csv(client: &mut impl OpcUaClient, reader: &mut impl InputReader, csv_path: &str) {
+pub fn run_csv(
+    client:   &mut impl OpcUaClient,
+    reader:   &mut impl InputReader,
+    csv_path: &str,
+    logger:   &Arc<Mutex<Logger>>,
+) {
     let mut rdr = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
         .from_path(csv_path)
@@ -304,8 +326,8 @@ pub fn run_csv(client: &mut impl OpcUaClient, reader: &mut impl InputReader, csv
 
     for (line, result) in rdr.deserialize::<CsvRow>().enumerate() {
         match result {
-            Ok(row) => process_row(&row, line + 2, client, reader),
-            Err(e) => eprintln!("{}", Globals::csv_invalid_row(line + 2, e)),
+            Ok(row)  => process_row(&row, line + 2, client, reader, logger),
+            Err(e)   => eprintln!("{}", Globals::csv_invalid_row(line + 2, e)),
         }
     }
 }
@@ -315,14 +337,20 @@ mod tests {
     use super::*;
     use opcua_client::prelude::{NodeId, Variant, UAString};
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use crate::logger::Logger;
     use crate::opc_ua_client::OpcUaClient;
     use crate::reader::InputReader;
+
+    fn no_logger() -> Arc<Mutex<Logger>> {
+        Arc::new(Mutex::new(Logger::new(None)))
+    }
 
     // ── Fakes ────────────────────────────────────────────────────────────────
 
     #[derive(Default)]
     struct FakeClient {
-        pub store: HashMap<String, Variant>,
+        pub store:  HashMap<String, Variant>,
         pub writes: Vec<(NodeId, Variant)>,
     }
 
@@ -335,9 +363,7 @@ mod tests {
         }
     }
 
-    struct ScriptedReader {
-        lines: Vec<String>,
-    }
+    struct ScriptedReader { lines: Vec<String> }
 
     impl ScriptedReader {
         fn new(lines: &[&str]) -> Self {
@@ -363,8 +389,7 @@ mod tests {
     fn parse_float()      { assert_eq!(parse_variant("3.14"),  Variant::Double(3.14));    }
     #[test]
     fn parse_string()     {
-        assert_eq!(parse_variant("hello"),
-            Variant::String(UAString::from("hello")));
+        assert_eq!(parse_variant("hello"), Variant::String(UAString::from("hello")));
     }
 
     // ── process_row tests ────────────────────────────────────────────────────
@@ -373,16 +398,9 @@ mod tests {
     fn write_row_calls_client() {
         let mut client = FakeClient::default();
         let mut reader = ScriptedReader::new(&[]);
-
-        let row = CsvRow {
-            action: "write".into(),
-            tag: "MyTag".into(),
-            value: Some("99".into()),
-            sleep: 0,
-        };
-
-        process_row(&row, 2, &mut client, &mut reader);
-
+        let row = CsvRow { action: "write".into(), tag: "MyTag".into(),
+                           value: Some("99".into()), sleep: 0 };
+        process_row(&row, 2, &mut client, &mut reader, &no_logger());
         assert_eq!(client.writes.len(), 1);
         assert_eq!(client.writes[0].1, Variant::Int64(99));
     }
@@ -391,16 +409,9 @@ mod tests {
     fn user_write_reads_from_reader() {
         let mut client = FakeClient::default();
         let mut reader = ScriptedReader::new(&["123"]);
-
-        let row = CsvRow {
-            action: "user_write".into(),
-            tag: "MyTag".into(),
-            value: None,
-            sleep: 0,
-        };
-
-        process_row(&row, 2, &mut client, &mut reader);
-
+        let row = CsvRow { action: "user_write".into(), tag: "MyTag".into(),
+                           value: None, sleep: 0 };
+        process_row(&row, 2, &mut client, &mut reader, &no_logger());
         assert_eq!(client.writes[0].1, Variant::Int64(123));
     }
 
@@ -408,15 +419,9 @@ mod tests {
     fn read_row_with_no_value_does_not_write() {
         let mut client = FakeClient::default();
         let mut reader = ScriptedReader::new(&[]);
-
-        let row = CsvRow {
-            action: "read".into(),
-            tag: "Missing".into(),
-            value: None,
-            sleep: 0,
-        };
-
-        process_row(&row, 2, &mut client, &mut reader);
+        let row = CsvRow { action: "read".into(), tag: "Missing".into(),
+                           value: None, sleep: 0 };
+        process_row(&row, 2, &mut client, &mut reader, &no_logger());
         assert!(client.writes.is_empty());
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "ua-orchestrator"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2024"
 authors = ["Stevie Chryn srcthird@gmail.com"]
 description = "A command-line tool for automating OPC UA node interactions using a CSV action script"

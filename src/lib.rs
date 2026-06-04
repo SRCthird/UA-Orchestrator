@@ -39,6 +39,7 @@
 //! | `config`          | Loads and parses `Config.toml`                            |
 //! | `globals`         | Centralised string and message constants                  |
 //! | `reader`          | Abstracts console input (`StdinReader` / `InputReader`)   |
+//! | `logger`          | Creates a logger wrapper that logs all actions            |
 //! | `opc_ua_client`   | OPC UA session wrapper and client trait                   |
 //! | `actions`         | CSV row parser and action dispatcher                      |
 //!
@@ -61,3 +62,4 @@ pub mod config;
 pub mod globals;
 pub mod opc_ua_client;
 pub mod reader;
+pub mod logger;

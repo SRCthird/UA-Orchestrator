@@ -52,6 +52,13 @@
 //!       => actions::run_csv(...)          executes the CSV script
 //! ```
 //!
+//! ## Logging
+//!
+//! All `println!` and `eprintln!` calls inside [`OpcUaSession`] and
+//! [`OpcUaSession::create_session`] are mirrored to the shared [`Logger`]
+//! when one is configured.  The [`OpcUaClient`] trait itself is unaffected —
+//! callers do not need to pass a logger.
+//!
 //! ## Panics
 //!
 //! [`OpcUaSession::new`] panics if:
@@ -61,11 +68,12 @@
 //! - Authentication fails.
 
 use opcua_client::prelude::*;
-use std::sync::{RwLock, Arc};
+use std::sync::{Arc, Mutex, RwLock};
 use gethostname::gethostname;
 use whoami::username;
 use crate::config::Config;
 use crate::globals::Globals;
+use crate::logger::Logger;
 
 // -----------------------------------------------------------------------------
 // OpcUaClient trait
@@ -226,6 +234,7 @@ impl SessionBackend for LiveSessionBackend {
 /// * `B` — Any type that implements [`SessionBackend`].
 pub struct OpcUaSession<B: SessionBackend = LiveSessionBackend> {
     backend: B,
+    logger:  Arc<Mutex<Logger>>,
 }
 
 impl OpcUaSession<LiveSessionBackend> {
@@ -251,10 +260,11 @@ impl OpcUaSession<LiveSessionBackend> {
     /// - The server URL is unreachable.
     /// - No endpoint matches the configured security policy and mode.
     /// - Authentication is rejected by the server.
-    pub fn new(config: &Config) -> Self {
-        let session = Self::create_session(config);
+    pub fn new(config: &Config, logger: Arc<Mutex<Logger>>) -> Self {
+        let session = Self::create_session(config, &logger);
         Self {
             backend: LiveSessionBackend::new(session),
+            logger,
         }
     }
 
@@ -263,16 +273,23 @@ impl OpcUaSession<LiveSessionBackend> {
     ///
     /// This is a private helper called exclusively by [`OpcUaSession::new`].
     /// It is responsible for all network I/O performed at start-up.
-    fn create_session(config: &Config) -> Arc<RwLock<Session>> {
+    fn create_session(config: &Config, logger: &Arc<Mutex<Logger>>) -> Arc<RwLock<Session>> {
         let hostname = gethostname().into_string().unwrap();
         let user     = username().unwrap();
 
         let app_name = Globals::app_name(&user);
         let app_uri  = Globals::app_uri(&hostname);
 
-        println!("{}", Globals::app_user_msg(&user));
-        println!("{}", Globals::app_name_msg(&app_name));
-        println!("{}", Globals::app_uri_msg(&app_uri));
+        let log_out = |msg: &str| {
+            println!("{}", msg);
+            if let Ok(log) = logger.lock() {
+                log.log_output(msg);
+            }
+        };
+
+        log_out(&Globals::app_user_msg(&user));
+        log_out(&Globals::app_name_msg(&app_name));
+        log_out(&Globals::app_uri_msg(&app_uri));
 
         let mut client = ClientBuilder::new()
             .application_name(app_name)
@@ -297,7 +314,7 @@ impl OpcUaSession<LiveSessionBackend> {
             })
             .expect(Globals::endpoint_error());
 
-        println!("{}", Globals::endpoint_connecting(endpoint.endpoint_url.as_ref()));
+        log_out(&Globals::endpoint_connecting(endpoint.endpoint_url.as_ref()));
 
         client
             .connect_to_endpoint(
@@ -328,7 +345,23 @@ impl<B: SessionBackend> OpcUaSession<B> {
     /// ```
     #[allow(unused)]
     pub fn with_backend(backend: B) -> Self {
-        Self { backend }
+        Self { 
+            backend,
+            logger: Arc::new(Mutex::new(Logger::new(None)))
+        }
+    }
+
+    /// Creates an [`OpcUaSession`] backed by a custom [`SessionBackend`] and
+    /// a shared [`Logger`].
+    ///
+    /// Useful for integration tests that want to assert on log output.
+    ///
+    /// # Arguments
+    /// * `backend` — Any [`SessionBackend`] implementation.
+    /// * `logger`  — Shared logger handle.
+    #[allow(unused)]
+    pub fn with_backend_and_logger(backend: B, logger: Arc<Mutex<Logger>>) -> Self {
+        Self { backend, logger }
     }
 
     /// Constructs a [`ReadValueId`] targeting the `Value` attribute of a node.
@@ -415,16 +448,24 @@ impl<B: SessionBackend> OpcUaSession<B> {
                 .map(|(i, dv)| match dv.value {
                     Some(v) => Some(v),
                     None => {
-                        println!(
-                            "{}",
-                            Globals::read_no_value(i, dv.status.unwrap_or(StatusCode::BadNoData))
+                        let msg = Globals::read_no_value(
+                            i,
+                            dv.status.unwrap_or(StatusCode::BadNoData),
                         );
+                        println!("{}", msg);
+                        if let Ok(log) = self.logger.lock() {
+                            log.log_output(&msg);
+                        }
                         None
                     }
                 })
                 .collect(),
             Err(e) => {
-                eprintln!("{}", Globals::read_error(e));
+                let msg = Globals::read_error(e);
+                eprintln!("{}", msg);
+                if let Ok(log) = self.logger.lock() {
+                    log.log_output(&msg);
+                }
                 vec![None; node_ids.len()]
             }
         }
@@ -452,7 +493,13 @@ impl<B: SessionBackend> OpcUaSession<B> {
                     // println!("{}", Globals::write_status(i, status));
                 }
             }
-            Err(e) => eprintln!("{}", Globals::write_error(e)),
+            Err(e) => {
+                let msg = Globals::write_error(e);
+                eprintln!("{}", msg);
+                if let Ok(log) = self.logger.lock() {
+                    log.log_output(&msg);
+                }
+            }
         }
     }
 }
@@ -501,7 +548,7 @@ pub mod tests {
             let results = nodes
                 .iter()
                 .map(|rvid| DataValue {
-                    value: store.get(&rvid.node_id).cloned(),
+                    value:              store.get(&rvid.node_id).cloned(),
                     status:             None,
                     source_timestamp:   None,
                     source_picoseconds: None,

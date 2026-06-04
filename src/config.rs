@@ -83,6 +83,9 @@ pub struct Config {
 
     /// OPC UA session password.
     pub password: String,
+
+    #[serde(default)]
+    pub log_file: Option<String>,
 }
 
 impl Config {
