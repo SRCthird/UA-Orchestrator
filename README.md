@@ -95,6 +95,7 @@ Values in the CSV are automatically parsed into the appropriate OPC UA `Variant`
 
 | Input | Type |
 |---|---|
+| `$*` | `String` where $ is dropped |
 | `true` / `false` (case-insensitive) | `Boolean` |
 | Integer string (e.g. `42`) | `Int64` |
 | Floating-point string (e.g. `3.14`) | `Double` |
@@ -106,6 +107,8 @@ Values in the CSV are automatically parsed into the appropriate OPC UA `Variant`
 action,     tag,               value, sleep
 comment,    Starting sequence, ,      0
 write,      MyNode.SetPoint,   100,   500
+read,       MyNode.SetPoint,   ,      0
+write,      MyNode.SSN,        $0100, 500
 read,       MyNode.SetPoint,   ,      0
 wait_until, MyNode.Status,     1,     250
 comment,    Done,              ,      0

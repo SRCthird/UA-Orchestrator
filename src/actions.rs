@@ -98,15 +98,22 @@ pub struct CsvRow {
     pub sleep: u64,
 }
 
+fn split_first(s: &str) -> Option<(char, &str)> {
+    let mut chars = s.chars();
+    let first = chars.next()?;
+    Some((first, chars.as_str()))
+}
+
 /// Parses a string slice into an OPC UA [`Variant`].
 ///
 /// The conversion follows this priority order:
 ///
-/// 1. `"true"` or `"false"` (case-insensitive, whitespace trimmed)
+/// 1. `$*` -> [`Variant::String`]
+/// 2. `"true"` or `"false"` (case-insensitive, whitespace trimmed)
 ///    → [`Variant::Boolean`]
-/// 2. A valid `i64` integer literal → [`Variant::Int64`]
-/// 3. A valid `f64` floating-point literal → [`Variant::Double`]
-/// 4. Anything else → [`Variant::String`] (whitespace trimmed)
+/// 3. A valid `i64` integer literal → [`Variant::Int64`]
+/// 4. A valid `f64` floating-point literal → [`Variant::Double`]
+/// 5. Anything else → [`Variant::String`] (whitespace trimmed)
 ///
 /// # Examples
 ///
@@ -117,6 +124,11 @@ pub struct CsvRow {
 /// assert_eq!(parse_variant("hello"), Variant::String(UAString::from("hello")));
 /// ```
 pub fn parse_variant(s: &str) -> Variant {
+    if s.starts_with("$") {
+        if let Some((_, remainder)) = split_first(s) {
+            return Variant::String(UAString::from(remainder.trim()))
+        }
+    }
     let lower = s.trim().to_lowercase();
 
     if lower == "true" {
