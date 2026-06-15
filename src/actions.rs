@@ -38,7 +38,7 @@
 //! types by [`parse_variant`]:
 //!
 //! - `"true"` / `"false"` (case-insensitive) → `Variant::Boolean`
-//! - Integer strings (e.g. `"42"`) → `Variant::Int64`
+//! - Integer strings (e.g. `"42"`) → `Variant::Int32`
 //! - Floating-point strings (e.g. `"3.14"`) → `Variant::Double`
 //! - Anything else → `Variant::String`
 //!
@@ -113,7 +113,7 @@ fn split_first(s: &str) -> Option<(char, &str)> {
 /// 1. `$*` -> [`Variant::String`]
 /// 2. `"true"` or `"false"` (case-insensitive, whitespace trimmed)
 ///    → [`Variant::Boolean`]
-/// 3. A valid `i64` integer literal → [`Variant::Int64`]
+/// 3. A valid `i32` integer literal → [`Variant::Int32`]
 /// 4. A valid `f64` floating-point literal → [`Variant::Double`]
 /// 5. Anything else → [`Variant::String`] (whitespace trimmed)
 ///
@@ -121,7 +121,7 @@ fn split_first(s: &str) -> Option<(char, &str)> {
 ///
 /// ```rust,ignore
 /// assert_eq!(parse_variant("true"),  Variant::Boolean(true));
-/// assert_eq!(parse_variant("42"),    Variant::Int64(42));
+/// assert_eq!(parse_variant("42"),    Variant::Int32(42));
 /// assert_eq!(parse_variant("3.14"),  Variant::Double(3.14));
 /// assert_eq!(parse_variant("hello"), Variant::String(UAString::from("hello")));
 /// ```
@@ -139,13 +139,47 @@ pub fn parse_variant(s: &str) -> Variant {
     if lower == "false" {
         return Variant::Boolean(false);
     }
-    if let Ok(i) = s.trim().parse::<i64>() {
-        return Variant::Int64(i);
+    if let Ok(i) = s.trim().parse::<i32>() {
+        return Variant::Int32(i);
     }
     if let Ok(f) = s.trim().parse::<f64>() {
         return Variant::Double(f);
     }
     Variant::String(UAString::from(s.trim()))
+}
+
+/// Coerces a raw string into the same [`Variant`] discriminant as `template`.
+///
+/// Used to match the server's actual datatype rather than guessing from the
+/// string content.  Falls back to [`parse_variant`] if the target type is
+/// unknown or the conversion fails.
+///
+/// # Arguments
+/// * `s`        — The raw value string from the CSV.
+/// * `template` — A [`Variant`] whose discriminant defines the target type.
+pub fn coerce_variant(s: &str, template: &Variant) -> Variant {
+    let t = s.trim();
+    match template {
+        Variant::Boolean(_) => {
+            match t.to_lowercase().as_str() {
+                "true" | "1"  => Variant::Boolean(true),
+                "false" | "0" => Variant::Boolean(false),
+                _             => parse_variant(t),   // fallback
+            }
+        }
+        Variant::SByte(_)  => t.parse::<i8>()  .map(Variant::SByte) .unwrap_or_else(|_| parse_variant(t)),
+        Variant::Byte(_)   => t.parse::<u8>()  .map(Variant::Byte)  .unwrap_or_else(|_| parse_variant(t)),
+        Variant::Int16(_)  => t.parse::<i16>() .map(Variant::Int16) .unwrap_or_else(|_| parse_variant(t)),
+        Variant::UInt16(_) => t.parse::<u16>() .map(Variant::UInt16).unwrap_or_else(|_| parse_variant(t)),
+        Variant::Int32(_)  => t.parse::<i32>() .map(Variant::Int32) .unwrap_or_else(|_| parse_variant(t)),
+        Variant::UInt32(_) => t.parse::<u32>() .map(Variant::UInt32).unwrap_or_else(|_| parse_variant(t)),
+        Variant::Int64(_)  => t.parse::<i64>() .map(Variant::Int64) .unwrap_or_else(|_| parse_variant(t)),
+        Variant::UInt64(_) => t.parse::<u64>() .map(Variant::UInt64).unwrap_or_else(|_| parse_variant(t)),
+        Variant::Float(_)  => t.parse::<f32>() .map(Variant::Float) .unwrap_or_else(|_| parse_variant(t)),
+        Variant::Double(_) => t.parse::<f64>() .map(Variant::Double).unwrap_or_else(|_| parse_variant(t)),
+        Variant::String(_) => Variant::String(UAString::from(t)),
+        _                  => parse_variant(t),   // DateTime, NodeId, etc. — best-effort
+    }
 }
 
 /// Executes a single [`CsvRow`] against the provided OPC UA client.
@@ -202,7 +236,10 @@ pub fn process_row(
 
         "write" => match &row.value {
             Some(v_str) => {
-                let variant = parse_variant(v_str);
+                let variant = match client.read(&node_id) {
+                    Some(current) => coerce_variant(v_str, &current),
+                    None          => parse_variant(v_str),   // node unreadable — best-effort
+                };
                 let msg = Globals::csv_write(&row.tag, &format!("{:?}", variant));
                 cprintln!("<bright-green>{}</>", msg);
                 if let Ok(log) = logger.lock() { log.log_output(&msg); }
@@ -227,7 +264,12 @@ pub fn process_row(
                     cformat!("<bright-green>{}</>", Globals::csv_user_write_prompt(&row.tag))
                 ),
             };
-            client.write(&node_id, parse_variant(&raw));
+
+            let variant = match client.read(&node_id) {
+                Some(current) => coerce_variant(&raw, &current),
+                None          => parse_variant(&raw),
+            };
+            client.write(&node_id, variant);
         }
 
         "comment" => {
@@ -243,7 +285,10 @@ pub fn process_row(
 
         "wait_until" => {
             if let Some(v_str) = &row.value {
-                let target = parse_variant(v_str);
+                let target = match client.read(&node_id) {
+                    Some(current) => coerce_variant(v_str, &current),
+                    None          => parse_variant(v_str),
+                };
                 let mut waiting_message_shown = false;
 
                 loop {
@@ -380,30 +425,48 @@ mod tests {
     // ── parse_variant tests ───────────────────────────────────────────────────
 
     #[test]
-    fn parse_bool_true()  { assert_eq!(parse_variant("true"),  Variant::Boolean(true));  }
-    #[test]
-    fn parse_bool_false() { assert_eq!(parse_variant("False"), Variant::Boolean(false)); }
-    #[test]
-    fn parse_int()        { assert_eq!(parse_variant("42"),    Variant::Int64(42));       }
-    #[test]
-    fn parse_float()      { assert_eq!(parse_variant("3.14"),  Variant::Double(3.14));    }
-    #[test]
-    fn parse_string()     {
-        assert_eq!(parse_variant("hello"), Variant::String(UAString::from("hello")));
-    }
-
-    // ── process_row tests ────────────────────────────────────────────────────
-
-    #[test]
     fn write_row_calls_client() {
         let mut client = FakeClient::default();
+        // Seed so that the pre-read returns the server type (Int32)
+        client.store.insert(
+            NodeId::new(2, "MyTag").to_string(),
+            Variant::Int32(0),
+        );
         let mut reader = ScriptedReader::new(&[]);
         let row = CsvRow { action: "write".into(), tag: "MyTag".into(),
                            value: Some("99".into()), sleep: 0 };
         process_row(&row, 2, &mut client, &mut reader, &no_logger());
         assert_eq!(client.writes.len(), 1);
-        assert_eq!(client.writes[0].1, Variant::Int64(99));
+        assert_eq!(client.writes[0].1, Variant::Int32(99));
     }
+
+    #[test]
+    fn write_row_unseedable_node_falls_back_to_parse() {
+        // Node not in store → read returns None → parse_variant fallback
+        let mut client = FakeClient::default();
+        let mut reader = ScriptedReader::new(&[]);
+        let row = CsvRow { action: "write".into(), tag: "MyTag".into(),
+                           value: Some("99".into()), sleep: 0 };
+        process_row(&row, 2, &mut client, &mut reader, &no_logger());
+        assert_eq!(client.writes[0].1, Variant::Int32(99));  // parse_variant gives Int32
+    }
+
+    #[test]
+    fn write_coerces_to_server_float() {
+        let mut client = FakeClient::default();
+        client.store.insert(
+            NodeId::new(2, "MyTag").to_string(),
+            Variant::Float(0.0),   // server uses Float, not Double
+        );
+        let mut reader = ScriptedReader::new(&[]);
+        let row = CsvRow { action: "write".into(), tag: "MyTag".into(),
+                           value: Some("3.14".into()), sleep: 0 };
+        process_row(&row, 2, &mut client, &mut reader, &no_logger());
+        assert_eq!(client.writes[0].1, Variant::Float(3.14_f32));
+    }
+
+
+    // ── process_row tests ────────────────────────────────────────────────────
 
     #[test]
     fn user_write_reads_from_reader() {
@@ -412,7 +475,7 @@ mod tests {
         let row = CsvRow { action: "user_write".into(), tag: "MyTag".into(),
                            value: None, sleep: 0 };
         process_row(&row, 2, &mut client, &mut reader, &no_logger());
-        assert_eq!(client.writes[0].1, Variant::Int64(123));
+        assert_eq!(client.writes[0].1, Variant::Int32(123));
     }
 
     #[test]
