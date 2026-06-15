@@ -27,3 +27,4 @@ target
 Config.toml
 pki
 actions.csv
+/logs
